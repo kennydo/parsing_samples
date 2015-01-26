@@ -8,158 +8,12 @@ import math
 import parsley
 import string
 
-class TimeSeries(object):
-    def __init__(self, xy_pairs):
-        self.data = dict(xy_pairs)
-        self.is_time_series = True
-
-    def add_time_series(self, other_ts):
-        xy_pairs = []
-        timestamps = set(self.data.keys()).union(set(other_ts.data.keys()))
-        for timestamp in timestamps:
-            xy_pairs.append((timestamp, self.data.get(timestamp, 0) + other_ts.data.get(timestamp, 0)))
-        return TimeSeries(xy_pairs)
-
-    def subtract_time_series(self, other_ts):
-        xy_pairs = []
-        timestamps = set(self.data.keys()).union(set(other_ts.data.keys()))
-        for timestamp in timestamps:
-            xy_pairs.append((timestamp, self.data.get(timestamp, 0) - other_ts.data.get(timestamp, 0)))
-        return TimeSeries(xy_pairs)
-
-    def multiply_time_series(self, other_ts):
-        xy_pairs = []
-        timestamps = set(self.data.keys()).union(set(other_ts.data.keys()))
-        for timestamp in timestamps:
-            xy_pairs.append((timestamp, self.data.get(timestamp, 0) * other_ts.data.get(timestamp, 0)))
-        return TimeSeries(xy_pairs)
-
-    def divide_time_series(self, other_ts):
-        xy_pairs = []
-        timestamps = set(self.data.keys()).union(set(other_ts.data.keys()))
-        for timestamp in timestamps:
-            xy_pairs.append((timestamp, float(self.data.get(timestamp, 0)) / float(other_ts.data.get(timestamp, 0))))
-        return TimeSeries(xy_pairs)
-
-    def modulo(self, quotient):
-        return TimeSeries([(timestamp, value % quotient) for timestamp, value in self.data.iteritems()])
-
-    def pretty_print(self, title=None):
-        print '>' + '-' * 79
-        if title:
-            print title
-        for timestamp in sorted(result_ts.data.keys()):
-            print timestamp, " -> ", result_ts.data[timestamp]
-        print '-' * 79 + '<'
-
-
-class ConstantDict(object):
-    """A fake dictionary that always returns the same value
-    """
-    def __init__(self, value):
-        self.value = value
-
-    def __len__(self):
-        return 1
-
-    def get(self, key, default=None):
-        return self.value
-
-    def __getitem__(self, key):
-        return self.value
-
-    def __setitem__(self, key, value):
-        raise ValueError("Can't change the value of a ConstantDict!")
-
-    def __delitem__(self, key):
-        raise ValueError("Can't delete from a ConstantDict!")
-
-    def iteritems(self):
-        return []
-
-    def __iter__(self):
-        return []
-
-    def __contains__(self, item):
-        return True
-
-    def keys(self):
-        return []
-
-
-class ScalarTimeSeries(TimeSeries):
-    def __init__(self, scalar):
-        self.data = ConstantDict(scalar)
-
-
-class ExprNode(object):
-    def eval(self):
-        raise NotImplementedError("Can't use base Expr's eval()")
-
-
-class IdentityNode(object):
-    def __init__(self, node):
-        self.node = node
-
-    def eval(self):
-        return self.node.eval()
-
-
-class TimeSeriesNode(ExprNode):
-    def __init__(self, ts):
-        self.time_series = ts
-
-    def eval(self):
-        return self.time_series
-
-
-class TwoOperandNode(ExprNode):
-    def __init__(self, left, right):
-        self.left = left
-        self.right = right
-
-
-class SubtractionNode(TwoOperandNode):
-    def eval(self):
-        return self.left.eval().subtract_time_series(self.right.eval())
-
-
-class AdditionNode(TwoOperandNode):
-    def eval(self):
-        return self.left.eval().add_time_series(self.right.eval())
-
-
-class MultiplicationNode(TwoOperandNode):
-    def eval(self):
-        return self.left.eval().multiply_time_series(self.right.eval())
-
-
-class DivisionNode(TwoOperandNode):
-    def eval(self):
-        return self.left.eval().divide_time_series(self.right.eval())
-
-
-class ModuloNode(ExprNode):
-    def __init__(self, node, quotient):
-        self.node = node
-        self.quotient = quotient
-
-    def eval(self):
-        return self.node.eval().modulo(self.quotient)
+import nodes
+from timeseries import ScalarTimeSeries, TimeSeries, generate_two_dummy_data_sets
 
 
 if __name__ == "__main__":
-    # this is just some dummy data
-    timestamps = [
-        1422244726 + (x * 60)
-        for x in range(0, 10)
-    ]
-    data_a = range(0, 10, 1)
-    # data_b alternates between 20 and 30
-    data_b = [20 + 10 * (x % 2) for x in range(0,10)]
-
-    a_ts = TimeSeries(zip(timestamps, data_a))
-    b_ts = TimeSeries(zip(timestamps, data_b))
+    a_ts, b_ts = generate_two_dummy_data_sets()
 
     grammar = parsley.makeGrammar("""
         digit = anything:x ?(x in string.digits) -> x
@@ -167,24 +21,18 @@ if __name__ == "__main__":
         timeseries_name = <(uppercase_alpha|'_')+>:x -> x
         number = <digit+ '.'? digit*>:x -> float(x)
 
-        expr = ( expr:a '+' expr:b -> AdditionNode(a, b)
-               | expr:a '-' expr:b -> SubtractionNode(a, b)
-               | expr:a '*' expr:b -> MultiplicationNode(a, b)
-               | expr:a '/' expr:b -> DivisionNode(a, b)
-               | expr:a '%' number:quotient -> ModuloNode(a, quotient)
-               | timeseries_name:a -> TimeSeriesNode(input_ts[a])
-               | number:scalar -> TimeSeriesNode(ScalarTimeSeries(scalar))
-               | '(' expr:e ')' -> IdentityNode(e)
+        expr = ( expr:a '+' expr:b -> nodes.AdditionNode(a, b)
+               | expr:a '-' expr:b -> nodes.SubtractionNode(a, b)
+               | expr:a '*' expr:b -> nodes.MultiplicationNode(a, b)
+               | expr:a '/' expr:b -> nodes.DivisionNode(a, b)
+               | expr:a '%' number:quotient -> nodes.ModuloNode(a, quotient)
+               | timeseries_name:a -> nodes.TimeSeriesNode(input_ts[a])
+               | number:scalar -> nodes.TimeSeriesNode(ScalarTimeSeries(scalar))
+               | '(' expr:e ')' -> nodes.IdentityNode(e)
                )
     """, {
         'string': string,
-        'TimeSeriesNode': TimeSeriesNode,
-        'IdentityNode': IdentityNode,
-        'AdditionNode': AdditionNode,
-        'SubtractionNode': SubtractionNode,
-        'MultiplicationNode': MultiplicationNode,
-        'DivisionNode': DivisionNode,
-        'ModuloNode': ModuloNode,
+        'nodes': nodes,
         'ScalarTimeSeries': ScalarTimeSeries,
         'input_ts': {
             'A_TS': a_ts,
